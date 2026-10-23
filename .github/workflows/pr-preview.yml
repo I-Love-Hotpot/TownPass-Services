@@ -5,56 +5,63 @@ on:
     types: [opened, synchronize, reopened, closed]
 
 jobs:
-  deploy-preview:
-    runs-on: k8s-dynamic-runner # 使用你們的地端 Runner
+  # ---------------------------------
+  # 1. 建置映像檔 Job (透過 Kaniko 執行)
+  # ---------------------------------
+  build:
+    runs-on: k8s-dynamic-runner
 
+    # 直接在此 Job 指定使用 Kaniko 官方執行容器
     container:
       image: gcr.io/kaniko-project/executor:v1.24.0-debug
       options: --user root
 
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-
-      # 1. 取得 PR 編號
       - name: Get PR Number
         id: pr
         run: echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
 
-      # 2. 如果 PR 被關閉或合併，執行清理
+      # Kaniko 容器內預設沒有 git checkout action，但它支援直接透過 --context 抓取遠端分支或結合認證打包
+      - name: Build and Push with Kaniko
+        if: github.event.action != 'closed'
+        run: |
+          mkdir -p /kaniko/.docker
+          echo "{\"auths\":{\"ghcr.io\":{\"username\":\"${{ github.actor }}\",\"password\":\"${{ secrets.GITHUB_TOKEN }}\"}}}" > /kaniko/.docker/config.json
+
+          /kaniko/executor \
+            --context=git://github.com/${{ github.repository }}.git#refs/pull/${{ github.event.pull_request.number }}/merge \
+            --dockerfile=Dockerfile \
+            --destination=ghcr.io/${{ github.repository_owner }}/townpass-preview:pr-${{ github.event.pull_request.number }}
+
+  # ---------------------------------
+  # 2. 部署預覽環境 Job (透過 Helm 執行)
+  # ---------------------------------
+  deploy:
+    runs-on: k8s-dynamic-runner
+    needs: build
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Get PR Number
+        id: pr
+        run: echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+
       - name: Cleanup Environment
         if: github.event.action == 'closed'
         run: |
           RELEASE_NAME="pr-${{ steps.pr.outputs.number }}"
-          echo "正在銷毀 $RELEASE_NAME 的預覽環境..."
           helm uninstall $RELEASE_NAME --namespace townpass || true
-          exit 0
 
-      # 3. 建置 Docker 映像檔並推送至私有 Registry
-      - name: Build and Push with Kaniko
-        if: github.event.action != 'closed'
-        run: |
-          # 建立 GHCR 的登入憑證設定檔
-          mkdir -p /kaniko/.docker
-          echo "{\"auths\":{\"ghcr.io\":{\"username\":\"${{ github.actor }}\",\"password\":\"${{ secrets.GITHUB_TOKEN }}\"}}}" > /kaniko/.docker/config.json
-
-          # 執行 Kaniko 打包並推送到你的 GHCR
-          /kaniko/executor \
-            --context=. \
-            --dockerfile=Dockerfile \
-            --destination=ghcr.io/${{ github.repository_owner }}/townpass-preview:pr-${{ steps.pr.outputs.number }}
-
-      # 4. 使用 Helm 動態部署預覽環境到 Kubernetes (搭配 Traefik 與 cert-manager)
       - name: Deploy with Helm
         if: github.event.action != 'closed'
         run: |
           RELEASE_NAME="pr-${{ steps.pr.outputs.number }}"
           helm upgrade --install $RELEASE_NAME .helm/preview-app \
-            --namespace ncufresh23 \
+            --namespace townpass \
             --set image.repository=ghcr.io/${{ github.repository_owner }}/townpass-preview \
             --set image.tag=pr-${{ steps.pr.outputs.number }}
 
-      # 5. 自動在 PR 下方留言預覽網址
       - name: Comment Preview URL
         if: github.event.action != 'closed'
         uses: marocchino/sticky-pull-request-comment@v2
