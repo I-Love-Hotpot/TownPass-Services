@@ -5,33 +5,13 @@ on:
     types: [opened, synchronize, reopened, closed]
 
 jobs:
-  # ---------------------------------
-  # 1. 建置映像檔 Job (透過 Kaniko 執行)
-  # ---------------------------------
-  build:
+  build-and-deploy:
     runs-on: k8s-dynamic-runner
 
-    steps:
-      - name: Get PR Number
-        id: pr
-        run: echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+    permissions:
+      contents: read
+      packages: write
 
-      # 使用成熟且支援在無 Docker 環境下運行的 Kaniko Action
-      - name: Build and Push with Kaniko
-        uses: int128/kaniko-action@v1
-        with:
-          context: .
-          dockerfile: Dockerfile
-          destination: ghcr.io/${{ github.repository_owner }}/townpass-preview:pr-${{ steps.pr.outputs.number }}
-          registry_username: ${{ github.actor }}
-          registry_password: ${{ secrets.GITHUB_TOKEN }}
-
-  # ---------------------------------
-  # 2. 部署預覽環境 Job (透過 Helm 執行)
-  # ---------------------------------
-  deploy:
-    runs-on: k8s-dynamic-runner
-    needs: build
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -40,12 +20,25 @@ jobs:
         id: pr
         run: echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
 
+      # 1. 使用官方 Kaniko Action 進行無特權打包與推送（不需要 docker.sock）
+      - name: Build and Push with Kaniko
+        if: github.event.action != 'closed'
+        uses: GoogleContainerTools/kaniko-action@v3
+        with:
+          context: .
+          dockerfile: Dockerfile
+          destination: ghcr.io/${{ github.repository_owner }}/townpass-preview:pr-${{ steps.pr.outputs.number }}
+          registry_username: ${{ github.actor }}
+          registry_password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 2. 清理環境 (PR 關閉時)
       - name: Cleanup Environment
         if: github.event.action == 'closed'
         run: |
           RELEASE_NAME="pr-${{ steps.pr.outputs.number }}"
           helm uninstall $RELEASE_NAME --namespace townpass || true
 
+      # 3. 使用 Helm 部署預覽環境
       - name: Deploy with Helm
         if: github.event.action != 'closed'
         run: |
@@ -55,6 +48,7 @@ jobs:
             --set image.repository=ghcr.io/${{ github.repository_owner }}/townpass-preview \
             --set image.tag=pr-${{ steps.pr.outputs.number }}
 
+      # 4. 自動在 PR 下方留言預覽網址
       - name: Comment Preview URL
         if: github.event.action != 'closed'
         uses: marocchino/sticky-pull-request-comment@v2
