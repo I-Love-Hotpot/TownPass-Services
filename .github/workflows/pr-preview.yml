@@ -26,12 +26,17 @@ jobs:
           exit 0
 
       # 3. 建置 Docker 映像檔並推送至私有 Registry
-      - name: Build and Push Docker Image
+      - name: Build and Push with Kaniko
         if: github.event.action != 'closed'
-        run: |
-          IMAGE_TAG="registry.dstw.dev/townpass-preview:pr-${{ steps.pr.outputs.number }}"
-          docker build -t $IMAGE_TAG .
-          docker push $IMAGE_TAG
+        uses: euxippe/kaniko-action@v3 # 或慣用的 kaniko action
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository_owner }}/townpass-preview
+          tag: pr-${{ steps.pr.outputs.number }}
+          dockerfile: Dockerfile
+          context: .
 
       # 4. 使用 Helm 動態部署預覽環境到 Kubernetes (搭配 Traefik 與 cert-manager)
       - name: Deploy with Helm
@@ -39,7 +44,8 @@ jobs:
         run: |
           RELEASE_NAME="pr-${{ steps.pr.outputs.number }}"
           helm upgrade --install $RELEASE_NAME .helm/preview-app \
-            --namespace townpass \
+            --namespace ncufresh23 \
+            --set image.repository=ghcr.io/${{ github.repository_owner }}/townpass-preview \
             --set image.tag=pr-${{ steps.pr.outputs.number }}
 
       # 5. 自動在 PR 下方留言預覽網址
