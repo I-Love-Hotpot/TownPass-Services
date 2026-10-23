@@ -11,27 +11,20 @@ jobs:
   build:
     runs-on: k8s-dynamic-runner
 
-    # 直接在此 Job 指定使用 Kaniko 官方執行容器
-    container:
-      image: gcr.io/kaniko-project/executor:v1.24.0-debug
-      options: --user root
-
     steps:
       - name: Get PR Number
         id: pr
         run: echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
 
-      # Kaniko 容器內預設沒有 git checkout action，但它支援直接透過 --context 抓取遠端分支或結合認證打包
+      # 使用成熟且支援在無 Docker 環境下運行的 Kaniko Action
       - name: Build and Push with Kaniko
-        if: github.event.action != 'closed'
-        run: |
-          mkdir -p /kaniko/.docker
-          echo "{\"auths\":{\"ghcr.io\":{\"username\":\"${{ github.actor }}\",\"password\":\"${{ secrets.GITHUB_TOKEN }}\"}}}" > /kaniko/.docker/config.json
-
-          /kaniko/executor \
-            --context=git://github.com/${{ github.repository }}.git#refs/pull/${{ github.event.pull_request.number }}/merge \
-            --dockerfile=Dockerfile \
-            --destination=ghcr.io/${{ github.repository_owner }}/townpass-preview:pr-${{ github.event.pull_request.number }}
+        uses: int128/kaniko-action@v1
+        with:
+          context: .
+          dockerfile: Dockerfile
+          destination: ghcr.io/${{ github.repository_owner }}/townpass-preview:pr-${{ steps.pr.outputs.number }}
+          registry_username: ${{ github.actor }}
+          registry_password: ${{ secrets.GITHUB_TOKEN }}
 
   # ---------------------------------
   # 2. 部署預覽環境 Job (透過 Helm 執行)
