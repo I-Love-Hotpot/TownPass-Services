@@ -1,0 +1,8 @@
+replicaCount: 1
+image:
+  repository: registry.dstw.dev/pr-preview-demo # 改成你們的 Registry
+  tag: latest
+service:
+  port: 80
+ingress:
+  className: nginx # 依你們集群的 Ingress Controller 而定

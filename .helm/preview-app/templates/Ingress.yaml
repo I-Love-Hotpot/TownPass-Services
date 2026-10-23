@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-cloudflare"
+    # 如果 Traefik 需要額外指定 Entrypoint，可以加在這裡（通常預設 websecure 即可）
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - "{{ .Release.Name }}.k8s.dstw.dev"
+      secretName: "{{ .Release.Name }}-tls"
+  rules:
+    - host: "{{ .Release.Name }}.k8s.dstw.dev"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}
+                port:
+                  number: 80

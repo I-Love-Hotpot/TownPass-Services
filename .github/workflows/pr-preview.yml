@@ -1,0 +1,52 @@
+name: PR Preview CI/CD
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  deploy-preview:
+    runs-on: k8s-dynamic-runner # 使用你們的地端 Runner
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 1. 取得 PR 編號
+      - name: Get PR Number
+        id: pr
+        run: echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+
+      # 2. 如果 PR 被關閉或合併，執行清理
+      - name: Cleanup Environment
+        if: github.event.action == 'closed'
+        run: |
+          RELEASE_NAME="pr-${{ steps.pr.outputs.number }}"
+          echo "正在銷毀 $RELEASE_NAME 的預覽環境..."
+          helm uninstall $RELEASE_NAME --namespace townpass || true
+          exit 0
+
+      # 3. 建置 Docker 映像檔並推送至私有 Registry
+      - name: Build and Push Docker Image
+        if: github.event.action != 'closed'
+        run: |
+          IMAGE_TAG="registry.dstw.dev/townpass-preview:pr-${{ steps.pr.outputs.number }}"
+          docker build -t $IMAGE_TAG .
+          docker push $IMAGE_TAG
+
+      # 4. 使用 Helm 動態部署預覽環境到 Kubernetes (搭配 Traefik 與 cert-manager)
+      - name: Deploy with Helm
+        if: github.event.action != 'closed'
+        run: |
+          RELEASE_NAME="pr-${{ steps.pr.outputs.number }}"
+          helm upgrade --install $RELEASE_NAME .helm/preview-app \
+            --namespace townpass \
+            --set image.tag=pr-${{ steps.pr.outputs.number }}
+
+      # 5. 自動在 PR 下方留言預覽網址
+      - name: Comment Preview URL
+        if: github.event.action != 'closed'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          message: |
+            🚀 **PR 預覽環境已上線！**
+            - 🌐 預覽網址: https://pr-${{ steps.pr.outputs.number }}.k8s.dstw.dev
