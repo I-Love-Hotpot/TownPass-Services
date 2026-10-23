@@ -28,7 +28,7 @@ jobs:
       # 3. 建置 Docker 映像檔並推送至私有 Registry
       - name: Build and Push with Kaniko
         if: github.event.action != 'closed'
-        uses: euxippe/kaniko-action@v3 # 或慣用的 kaniko action
+        uses: int128/kaniko-action@v1 # 或慣用的 kaniko action
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
