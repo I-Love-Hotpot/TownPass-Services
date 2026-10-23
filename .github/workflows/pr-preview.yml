@@ -7,6 +7,11 @@ on:
 jobs:
   deploy-preview:
     runs-on: k8s-dynamic-runner # 使用你們的地端 Runner
+
+    container:
+      image: gcr.io/kaniko-project/executor:v1.24.0-debug
+      options: --user root
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -28,15 +33,16 @@ jobs:
       # 3. 建置 Docker 映像檔並推送至私有 Registry
       - name: Build and Push with Kaniko
         if: github.event.action != 'closed'
-        uses: int128/kaniko-action@v1 # 或慣用的 kaniko action
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository_owner }}/townpass-preview
-          tag: pr-${{ steps.pr.outputs.number }}
-          dockerfile: Dockerfile
-          context: .
+        run: |
+          # 建立 GHCR 的登入憑證設定檔
+          mkdir -p /kaniko/.docker
+          echo "{\"auths\":{\"ghcr.io\":{\"username\":\"${{ github.actor }}\",\"password\":\"${{ secrets.GITHUB_TOKEN }}\"}}}" > /kaniko/.docker/config.json
+
+          # 執行 Kaniko 打包並推送到你的 GHCR
+          /kaniko/executor \
+            --context=. \
+            --dockerfile=Dockerfile \
+            --destination=ghcr.io/${{ github.repository_owner }}/townpass-preview:pr-${{ steps.pr.outputs.number }}
 
       # 4. 使用 Helm 動態部署預覽環境到 Kubernetes (搭配 Traefik 與 cert-manager)
       - name: Deploy with Helm
