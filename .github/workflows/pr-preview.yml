@@ -39,14 +39,16 @@ jobs:
           helm uninstall $RELEASE_NAME --namespace townpass || true
 
       # 3. 使用 Helm 部署預覽環境
-      - name: Deploy with Helm
+      - name: Log in to GHCR
+        if: github.event.action != 'closed'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Build and Push Docker Image
         if: github.event.action != 'closed'
         run: |
-          RELEASE_NAME="pr-${{ steps.pr.outputs.number }}"
-          helm upgrade --install $RELEASE_NAME .helm/preview-app \
-            --namespace townpass \
-            --set image.repository=ghcr.io/${{ github.repository_owner }}/townpass-preview \
-            --set image.tag=pr-${{ steps.pr.outputs.number }}
+          IMAGE_TAG="ghcr.io/${{ github.repository_owner }}/townpass-preview:pr-${{ steps.pr.outputs.number }}"
+          docker build -t $IMAGE_TAG .
+          docker push $IMAGE_TAG
 
       # 4. 自動在 PR 下方留言預覽網址
       - name: Comment Preview URL
